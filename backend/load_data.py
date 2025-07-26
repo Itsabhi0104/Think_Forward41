@@ -1,35 +1,62 @@
+# load_data.py
 import os
 import pandas as pd
-from database.lancedb import get_db
+from dotenv import load_dotenv
+from app import create_app
+from database import db
+from models import (
+    User,
+    DistributionCentre,
+    Product,
+    Order,
+    OrderItem,
+    InventoryItem
+)
 
-CSV_FOLDER = os.path.join(os.path.dirname(__file__), "csvfiles")
+CSV_DIR = os.path.join(os.path.dirname(__file__), 'csvfiles')
 
-TABLES = {
-    "distribution_centres": "distribution_centres.csv",
-    "inventory_items": "inventory_items.csv",
-    "order_items": "order_items.csv",
-    "orders": "orders.csv",
-    "products": "products.csv",
-    "users": "users.csv"
-}
+def parse_datetime(val):
+    return pd.to_datetime(val, errors='coerce')
 
-def load_csv_to_lancedb():
-    db = get_db()
-    for table, filename in TABLES.items():
-        path = os.path.join(CSV_FOLDER, filename)
-        if not os.path.exists(path):
-            print(f"CSV file for {table} not found: {path}")
-            continue
-        try:
+def df_to_models(df, model_cls):
+    objs = []
+    for record in df.to_dict(orient='records'):
+        kwargs = {}
+        for col in model_cls.__table__.columns.keys():
+            if col in record:
+                val = record[col]
+                if col.endswith('_at') or 'date' in col:
+                    val = parse_datetime(val)
+                kwargs[col] = val
+        objs.append(model_cls(**kwargs))
+    return objs
+
+def main():
+    load_dotenv()
+    app = create_app()
+    with app.app_context():
+        db.create_all()
+
+        tables = [
+            (User,               'users.csv'),
+            (DistributionCentre, 'distribution_centers.csv'),
+            (Product,            'products.csv'),
+            (Order,              'orders.csv'),
+            (OrderItem,          'order_items.csv'),
+            (InventoryItem,      'inventory_items.csv'),
+        ]
+
+        for model_cls, fname in tables:
+            path = os.path.join(CSV_DIR, fname)
+            if not os.path.isfile(path):
+                print(f"⚠️  Missing {fname}, skipping.")
+                continue
+
             df = pd.read_csv(path)
-            if table not in db.table_names():
-                db.create_table(table, data=df)
-                print(f"Created and loaded table: {table}")
-            else:
-                db[table].add(df)
-                print(f"Appended data to table: {table}")
-        except Exception as e:
-            print(f"Error loading {table}: {e}")
+            objs = df_to_models(df, model_cls)
+            db.session.bulk_save_objects(objs)
+            db.session.commit()
+            print(f"✅ {model_cls.__tablename__}: loaded {len(objs)} rows")
 
-if __name__ == "__main__":
-    load_csv_to_lancedb()
+if __name__ == '__main__':
+    main()

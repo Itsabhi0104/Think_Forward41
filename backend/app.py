@@ -1,15 +1,27 @@
+# app.py
+import os
 from flask import Flask
-from database.schema import create_tables
+from dotenv import load_dotenv
+from database import db, migrate
+from auth import auth_bp
+from chat import chat_bp
+from reports import reports_bp
 
-app = Flask(__name__)
+def create_app():
+    load_dotenv()
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_DATABASE_URI']        = os.getenv('DATABASE_URL')
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['JWT_SECRET_KEY']                 = os.getenv('JWT_SECRET_KEY')
 
-@app.before_first_request
-def setup_db():
-    create_tables()
+    db.init_app(app)
+    migrate.init_app(app, db)
 
-@app.route("/")
-def home():
-    return "Customer Clothing Platform API is running."
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(chat_bp)
+    app.register_blueprint(reports_bp)
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    return app
+
+if __name__ == '__main__':
+    create_app().run(host='0.0.0.0', port=5000, debug=True)
